@@ -1,0 +1,19 @@
+[package]
+name = "maricraft"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+avian3d = "0.2.0"
+bevy = { version = "0.15.0", default-features = false, features = [
+    "bevy_mesh_picking_backend",
+    "bevy_pbr",
+    "bevy_picking",
+    "bevy_state",
+    "bevy_ui",
+    "bevy_window",
+    "bevy_winit",
+    "png",
+    "tonemapping_luts",
+    "wayland",
+] }
