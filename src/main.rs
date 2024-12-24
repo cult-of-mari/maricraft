@@ -249,13 +249,13 @@ fn finalize(
 
 fn update_hud(
     velocity: Single<&LinearVelocity, With<PlayerBody>>,
-    transform: Single<&Transform, With<PlayerEye>>,
+    player_body: Single<(&Transform, &WishDir), With<PlayerBody>>,
     mut text: Single<&mut Text, With<Hud>>,
 ) {
+    let (transform, wish_dir) = player_body.into_inner();
     let (x, y, z) = transform.translation.into();
     let (vx, vy, vz) = (***velocity).into();
-    let rotation: Vec3 = transform.rotation.to_euler(EulerRot::YXZ).into();
-    let (yaw, pitch, roll) = rotation.map(f32::to_degrees).into();
+    let (yaw, pitch) = wish_dir.map(f32::to_degrees).into();
 
-    ***text = format!("XYZ: {x:0.2}, {y:0.2}, {z:0.2}\nVEL: {vx:0.2}, {vy:0.2}, {vz:0.2}\nYPR: {yaw:0.2}, {pitch:0.2}, {roll:0.2}");
+    ***text = format!("XYZ: {x:0.2}, {y:0.2}, {z:0.2}\nVEL: {vx:0.2}, {vy:0.2}, {vz:0.2}\n YP: {yaw:0.2}, {pitch:0.2}");
 }
