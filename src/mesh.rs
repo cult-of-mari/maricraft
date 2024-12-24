@@ -1,7 +1,5 @@
-use bevy::{
-    prelude::*,
-    render::mesh::{Indices, PrimitiveTopology},
-};
+use bevy::prelude::*;
+use bevy::render::mesh::{Indices, PrimitiveTopology};
 
 const TEXTURE_SIZE: f32 = 16.0;
 

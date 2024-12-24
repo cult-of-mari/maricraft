@@ -1,16 +1,12 @@
 use self::physics::{CharacterControllerBundle, CharacterControllerPlugin};
 use avian3d::math::*;
 use avian3d::prelude::*;
-use bevy::{
-    asset::LoadedFolder,
-    image::ImageSampler,
-    pbr::wireframe::{Wireframe, WireframeConfig, WireframePlugin},
-    prelude::*,
-    render::{
-        settings::{RenderCreation, WgpuFeatures, WgpuSettings},
-        RenderPlugin,
-    },
-};
+use bevy::asset::LoadedFolder;
+use bevy::image::ImageSampler;
+use bevy::pbr::wireframe::{Wireframe, WireframeConfig, WireframePlugin};
+use bevy::prelude::*;
+use bevy::render::settings::{RenderCreation, WgpuFeatures, WgpuSettings};
+use bevy::render::RenderPlugin;
 use leafwing_input_manager::prelude::*;
 use std::collections::HashMap;
 
@@ -89,17 +85,9 @@ fn main() {
             InputManagerPlugin::<Action>::default(),
             MeshPickingPlugin,
             PhysicsPlugins::default(),
-            //PhysicsDebugPlugin::default(),
             CharacterControllerPlugin,
             WireframePlugin,
         ))
-        /*.insert_gizmo_config(
-            PhysicsGizmos {
-                aabb_color: Some(Color::WHITE),
-                ..default()
-            },
-            GizmoConfig::default(),
-        )*/
         .insert_resource(WireframeConfig {
             global: false,
             default_color: Color::WHITE,

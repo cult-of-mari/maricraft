@@ -4,8 +4,10 @@
 
 use super::Action;
 use crate::{PlayerBody, PlayerEye, WishDir};
-use avian3d::{math::*, prelude::*};
-use bevy::{ecs::query::Has, prelude::*};
+use avian3d::math::*;
+use avian3d::prelude::*;
+use bevy::ecs::query::Has;
+use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 
 pub struct CharacterControllerPlugin;
