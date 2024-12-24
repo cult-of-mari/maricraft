@@ -1,14 +1,21 @@
+use self::physics::{CharacterControllerBundle, CharacterControllerPlugin};
+use avian3d::math::*;
+use avian3d::prelude::*;
 use bevy::{
-    asset::{LoadedFolder, RenderAssetUsages},
+    asset::LoadedFolder,
     image::ImageSampler,
     pbr::wireframe::{Wireframe, WireframeConfig, WireframePlugin},
     prelude::*,
     render::{
-        mesh::{Indices, PrimitiveTopology},
         settings::{RenderCreation, WgpuFeatures, WgpuSettings},
         RenderPlugin,
     },
 };
+use leafwing_input_manager::prelude::*;
+use std::collections::HashMap;
+
+mod mesh;
+mod physics;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, States)]
 enum GameState {
@@ -20,6 +27,7 @@ enum GameState {
 #[derive(Debug, Resource)]
 struct State {
     block: Handle<Mesh>,
+    texture_map: HashMap<String, u32>,
 }
 
 #[derive(Resource, Default)]
@@ -27,6 +35,46 @@ struct TextureFolder(Handle<LoadedFolder>);
 
 #[derive(Component)]
 struct Block;
+
+#[derive(Component)]
+struct PlayerBody;
+
+#[derive(Component)]
+struct PlayerEye;
+
+#[derive(Component)]
+struct Hud;
+
+#[derive(Component, Deref, DerefMut)]
+pub struct WishDir(Vec2);
+
+#[derive(Actionlike, Clone, Copy, Debug, Eq, Hash, PartialEq, Reflect)]
+enum Action {
+    #[actionlike(DualAxis)]
+    Look,
+    #[actionlike(DualAxis)]
+    Move,
+    Jump,
+    Sneak,
+    Sprint,
+    Attack,
+    Pick,
+    Use,
+}
+
+impl Action {
+    pub fn input_map() -> InputMap<Self> {
+        InputMap::default()
+            .with_dual_axis(Action::Look, MouseMove::default())
+            .with_dual_axis(Action::Move, VirtualDPad::wasd())
+            .with(Action::Jump, KeyCode::Space)
+            .with(Action::Sneak, KeyCode::KeyC)
+            .with(Action::Sprint, MouseButton::Other(4))
+            .with(Action::Attack, MouseButton::Left)
+            .with(Action::Pick, MouseButton::Middle)
+            .with(Action::Use, MouseButton::Right)
+    }
+}
 
 fn main() {
     App::new()
@@ -38,9 +86,20 @@ fn main() {
                 }),
                 ..default()
             }),
+            InputManagerPlugin::<Action>::default(),
             MeshPickingPlugin,
+            PhysicsPlugins::default(),
+            PhysicsDebugPlugin::default(),
+            CharacterControllerPlugin,
             WireframePlugin,
         ))
+        .insert_gizmo_config(
+            PhysicsGizmos {
+                aabb_color: Some(Color::WHITE),
+                ..default()
+            },
+            GizmoConfig::default(),
+        )
         .insert_resource(WireframeConfig {
             global: false,
             default_color: Color::WHITE,
@@ -49,6 +108,7 @@ fn main() {
         .add_systems(OnEnter(GameState::Setup), setup)
         .add_systems(Update, loading.run_if(in_state(GameState::Setup)))
         .add_systems(OnExit(GameState::Setup), finalize)
+        .add_systems(Update, update_hud.run_if(in_state(GameState::InGame)))
         .run();
 }
 
@@ -69,6 +129,7 @@ fn loading(
 }
 
 fn finalize(
+    asset_server: Res<AssetServer>,
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -78,14 +139,27 @@ fn finalize(
 ) {
     let texture_folder = loaded_folders.get(&texture_folder.0).unwrap();
     let mut builder = TextureAtlasBuilder::default();
+    let mut texture_map = HashMap::new();
+    let mut index = 0;
 
     for handle in texture_folder.handles.iter() {
         let id = handle.id().typed_unchecked::<Image>();
+        let path = handle
+            .path()
+            .unwrap()
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy();
+
         let texture = images.get(id).unwrap();
 
-        info!("{:?}", handle.path());
-
         builder.add_texture(Some(id), texture);
+        texture_map.insert(path.to_string(), index);
+
+        index += 1;
+
+        info!("loaded texture {path} into atlas at {index}");
     }
 
     let (_layout, _sources, mut image) = builder.build().unwrap();
@@ -93,17 +167,18 @@ fn finalize(
     image.sampler = ImageSampler::nearest();
     let image_handle = images.add(image);
 
-    let mesh = new_block_mesh(
-        1, // Front
-        1, // Back
-        1, // Right
-        1, // Left
-        2, // Top
-        0, // Bottom
+    let mesh = mesh::new_block(
+        texture_map["grass_side.png"], // Front
+        texture_map["grass_side.png"], // Back
+        texture_map["grass_side.png"], // Right
+        texture_map["grass_side.png"], // Left
+        texture_map["grass_top.png"],  // Top
+        texture_map["dirt.png"],       // Bottom
     );
 
     let state = State {
         block: meshes.add(mesh),
+        texture_map,
     };
 
     for x in -5..5 {
@@ -111,7 +186,6 @@ fn finalize(
             commands
                 .spawn((
                     Block,
-                    Name::new("block"),
                     Mesh3d(state.block.clone()),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::WHITE,
@@ -120,8 +194,9 @@ fn finalize(
                         reflectance: 0.1,
                         ..default()
                     })),
-                    Transform::from_xyz((x as f32) * 5.0, -7.0, (y as f32) * 5.0)
-                        .with_scale(Vec3::splat(5.0)),
+                    Transform::from_xyz(x as f32, -10.0, y as f32),
+                    RigidBody::Static,
+                    Collider::cuboid(1.0, 1.0, 1.0),
                 ))
                 .observe(|trigger: Trigger<Pointer<Over>>, mut commands: Commands| {
                     let entity = trigger.entity();
@@ -145,101 +220,42 @@ fn finalize(
         Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::new(-0.15, -0.05, 0.25), Vec3::Y),
     ));
 
-    commands.spawn((
-        Name::new("camera"),
-        Camera3d::default(),
-        Transform::from_xyz(0.0, 0.0, 50.0),
-    ));
+    commands
+        .spawn((
+            PlayerBody,
+            WishDir(Vec2::ZERO),
+            InputManagerBundle::with_map(Action::input_map()),
+            CharacterControllerBundle::new(Collider::capsule(0.5, 1.0), Vector::NEG_Y * 9.81 * 2.0)
+                .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
+            Transform::default(),
+        ))
+        .with_children(|builder| {
+            builder
+                .spawn((PlayerEye, Visibility::default(), Transform::default()))
+                .with_child((Camera3d::default(), Transform::from_xyz(0.0, 0.0, 10.0)));
+        });
+
+    let font = asset_server.load("fonts/RobotoMono-Regular.ttf");
+
+    commands.spawn(Node::default()).with_children(|builder| {
+        builder.spawn((
+            Hud,
+            Text::new("ok"),
+            TextColor(Color::WHITE),
+            TextFont { font, ..default() },
+        ));
+    });
 }
 
-fn new_block_uv(index: u32) -> [Vec2; 2] {
-    let position = Vec2::new(index as f32, 0.0);
+fn update_hud(
+    velocity: Single<&LinearVelocity, With<PlayerBody>>,
+    transform: Single<&Transform, With<PlayerEye>>,
+    mut text: Single<&mut Text, With<Hud>>,
+) {
+    let (x, y, z) = transform.translation.into();
+    let (vx, vy, vz) = (***velocity).into();
+    let rotation: Vec3 = transform.rotation.to_euler(EulerRot::YXZ).into();
+    let (yaw, pitch, roll) = rotation.map(f32::to_degrees).into();
 
-    let min = position / Vec2::splat(16.0);
-    let max = (position + Vec2::ONE) / Vec2::splat(16.0);
-
-    [min, max]
-}
-
-fn new_block_mesh(front: u32, back: u32, right: u32, left: u32, top: u32, bottom: u32) -> Mesh {
-    let [front_min, front_max] = new_block_uv(front);
-    let [back_min, back_max] = new_block_uv(back);
-    let [right_min, right_max] = new_block_uv(right);
-    let [left_min, left_max] = new_block_uv(left);
-    let [top_min, top_max] = new_block_uv(top);
-    let [bottom_min, bottom_max] = new_block_uv(bottom);
-
-    let min = -0.5;
-    let max = 0.5;
-
-    let vertices = &[
-        // Front
-        ([min, min, max], [0.0, 0.0, 1.0], [front_min.x, front_max.y]),
-        ([max, min, max], [0.0, 0.0, 1.0], [front_max.x, front_max.y]),
-        ([max, max, max], [0.0, 0.0, 1.0], [front_max.x, front_min.y]),
-        ([min, max, max], [0.0, 0.0, 1.0], [front_min.x, front_min.y]),
-        // Back
-        ([min, max, min], [0.0, 0.0, -1.0], [back_min.x, back_max.y]),
-        ([max, max, min], [0.0, 0.0, -1.0], [back_max.x, back_max.y]),
-        ([max, min, min], [0.0, 0.0, -1.0], [back_max.x, back_min.y]),
-        ([min, min, min], [0.0, 0.0, -1.0], [back_min.x, back_min.y]),
-        // Right
-        ([max, min, min], [1.0, 0.0, 0.0], [right_max.x, right_max.y]),
-        ([max, max, min], [1.0, 0.0, 0.0], [right_max.x, right_min.y]),
-        ([max, max, max], [1.0, 0.0, 0.0], [right_min.x, right_min.y]),
-        ([max, min, max], [1.0, 0.0, 0.0], [right_min.x, right_max.y]),
-        // Left
-        ([min, min, max], [-1.0, 0.0, 0.0], [left_max.x, left_max.y]),
-        ([min, max, max], [-1.0, 0.0, 0.0], [left_max.x, left_min.y]),
-        ([min, max, min], [-1.0, 0.0, 0.0], [left_min.x, left_min.y]),
-        ([min, min, min], [-1.0, 0.0, 0.0], [left_min.x, left_max.y]),
-        // Top
-        ([max, max, min], [0.0, 1.0, 0.0], [top_max.x, top_min.y]),
-        ([min, max, min], [0.0, 1.0, 0.0], [top_min.x, top_min.y]),
-        ([min, max, max], [0.0, 1.0, 0.0], [top_min.x, top_max.y]),
-        ([max, max, max], [0.0, 1.0, 0.0], [top_max.x, top_max.y]),
-        // Bottom
-        (
-            [max, min, max],
-            [0.0, -1.0, 0.0],
-            [bottom_max.x, bottom_max.y],
-        ),
-        (
-            [min, min, max],
-            [0.0, -1.0, 0.0],
-            [bottom_max.x, bottom_min.y],
-        ),
-        (
-            [min, min, min],
-            [0.0, -1.0, 0.0],
-            [bottom_min.x, bottom_min.y],
-        ),
-        (
-            [max, min, min],
-            [0.0, -1.0, 0.0],
-            [bottom_min.x, bottom_max.y],
-        ),
-    ];
-
-    let positions: Vec<_> = vertices.iter().map(|(p, _, _)| *p).collect();
-    let normals: Vec<_> = vertices.iter().map(|(_, n, _)| *n).collect();
-    let uvs: Vec<_> = vertices.iter().map(|(_, _, uv)| *uv).collect();
-
-    let indices = Indices::U32(vec![
-        0, 1, 2, 2, 3, 0, // Front
-        4, 5, 6, 6, 7, 4, // Back
-        8, 9, 10, 10, 11, 8, // Right
-        12, 13, 14, 14, 15, 12, // Left
-        16, 17, 18, 18, 19, 16, // Top
-        20, 21, 22, 22, 23, 20, // Bottom
-    ]);
-
-    Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-    .with_inserted_indices(indices)
+    ***text = format!("XYZ: {x:0.2}, {y:0.2}, {z:0.2}\nVEL: {vx:0.2}, {vy:0.2}, {vz:0.2}\nYPR: {yaw:0.2}, {pitch:0.2}, {roll:0.2}");
 }
