@@ -23,7 +23,9 @@ enum GameState {
 #[derive(Debug, Resource)]
 struct State {
     block: Handle<Mesh>,
+    texture_atlas: Handle<Image>,
     texture_map: HashMap<String, u32>,
+    material: Handle<StandardMaterial>,
 }
 
 #[derive(Resource, Default)]
@@ -153,7 +155,7 @@ fn finalize(
     let (_layout, _sources, mut image) = builder.build().unwrap();
 
     image.sampler = ImageSampler::nearest();
-    let image_handle = images.add(image);
+    let texture_atlas = images.add(image);
 
     let mesh = mesh::new_block(
         texture_map["grass_side.png"], // Front
@@ -164,40 +166,28 @@ fn finalize(
         texture_map["dirt.png"],       // Bottom
     );
 
+    let material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        base_color_texture: Some(texture_atlas.clone()),
+        perceptual_roughness: 0.97,
+        reflectance: 0.1,
+        ..default()
+    });
+
     let state = State {
         block: meshes.add(mesh),
+        texture_atlas,
         texture_map,
+        material,
     };
 
     for x in 0..=16 {
         for y in 0..=16 {
-            commands
-                .spawn((
-                    Block,
-                    Mesh3d(state.block.clone()),
-                    MeshMaterial3d(materials.add(StandardMaterial {
-                        base_color: Color::WHITE,
-                        base_color_texture: Some(image_handle.clone()),
-                        perceptual_roughness: 0.97,
-                        reflectance: 0.1,
-                        ..default()
-                    })),
-                    Transform::from_xyz(x as f32, -10.0, y as f32),
-                    RigidBody::Static,
-                    Collider::cuboid(1.0, 1.0, 1.0),
-                ))
-                .observe(|trigger: Trigger<Pointer<Over>>, mut commands: Commands| {
-                    let entity = trigger.entity();
-
-                    commands.entity(entity).insert(Wireframe);
-                })
-                .observe(|trigger: Trigger<Pointer<Out>>, mut commands: Commands| {
-                    let entity = trigger.entity();
-
-                    commands.entity(entity).remove::<Wireframe>();
-                });
+            spawn_block(&mut commands, &state, Vec3::new(x as f32, -10.0, y as f32));
         }
     }
+
+    commands.insert_resource(state);
 
     commands.spawn((
         DirectionalLight {
@@ -251,4 +241,45 @@ fn update_hud(
     let (yaw, pitch) = wish_dir.map(f32::to_degrees).into();
 
     ***text = format!("XYZ: {x:0.2}, {y:0.2}, {z:0.2}\nVEL: {vx:0.2}, {vy:0.2}, {vz:0.2}\n YP: {yaw:0.2}, {pitch:0.2}");
+}
+
+fn spawn_block(commands: &mut Commands, state: &State, position: Vec3) {
+    info!("spawn block at {position:?}");
+
+    commands
+        .spawn((
+            Block,
+            Mesh3d(state.block.clone()),
+            MeshMaterial3d(state.material.clone()),
+            Transform::from_translation(position),
+            RigidBody::Static,
+            Collider::cuboid(1.0, 1.0, 1.0),
+        ))
+        .observe(on_pointer_over)
+        .observe(on_pointer_out)
+        .observe(on_pointer_click);
+}
+
+fn on_pointer_over(trigger: Trigger<Pointer<Over>>, mut commands: Commands) {
+    commands.entity(trigger.entity()).insert(Wireframe);
+}
+
+fn on_pointer_out(trigger: Trigger<Pointer<Out>>, mut commands: Commands) {
+    commands.entity(trigger.entity()).remove::<Wireframe>();
+}
+
+fn on_pointer_click(
+    trigger: Trigger<Pointer<Click>>,
+    mut commands: Commands,
+    query: Query<&Transform, With<Block>>,
+    state: Res<State>,
+) {
+    let entity = trigger.entity();
+    let position = query.get(entity).unwrap().translation + Vec3::Y;
+
+    match trigger.event().button {
+        PointerButton::Primary => spawn_block(&mut commands, &state, position),
+        PointerButton::Secondary => commands.entity(entity).despawn_recursive(),
+        _ => {}
+    }
 }
