@@ -89,17 +89,17 @@ fn main() {
             InputManagerPlugin::<Action>::default(),
             MeshPickingPlugin,
             PhysicsPlugins::default(),
-            PhysicsDebugPlugin::default(),
+            //PhysicsDebugPlugin::default(),
             CharacterControllerPlugin,
             WireframePlugin,
         ))
-        .insert_gizmo_config(
+        /*.insert_gizmo_config(
             PhysicsGizmos {
                 aabb_color: Some(Color::WHITE),
                 ..default()
             },
             GizmoConfig::default(),
-        )
+        )*/
         .insert_resource(WireframeConfig {
             global: false,
             default_color: Color::WHITE,
@@ -181,8 +181,8 @@ fn finalize(
         texture_map,
     };
 
-    for x in -5..5 {
-        for y in -5..5 {
+    for x in 0..=16 {
+        for y in 0..=16 {
             commands
                 .spawn((
                     Block,
@@ -224,6 +224,11 @@ fn finalize(
         .spawn((
             PlayerBody,
             WishDir(Vec2::ZERO),
+            Mesh3d(meshes.add(Cuboid::from_size(Vec3::new(1.0, 2.0, 1.0)))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                ..default()
+            })),
             InputManagerBundle::with_map(Action::input_map()),
             CharacterControllerBundle::new(Collider::capsule(0.5, 1.0), Vector::NEG_Y * 9.81 * 2.0)
                 .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
